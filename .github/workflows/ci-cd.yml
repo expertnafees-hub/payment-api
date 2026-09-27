@@ -52,7 +52,7 @@ jobs:
           docker build -t payment-api:${{ github.sha }} .
 
       - name: Run Trivy Security Gate
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@v0.29.0
         with:
           image-ref: 'payment-api:${{ github.sha }}'
           format: 'table'
