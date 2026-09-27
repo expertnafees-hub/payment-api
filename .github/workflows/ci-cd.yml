@@ -1,0 +1,95 @@
+name: Payment API - Enterprise Container CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  id-token: write   # OIDC JWT token request karne ke liye zaroori hai
+  contents: read    # Repository code read karne ke liye
+
+jobs:
+  # ==========================================
+  # GATE 1: UNIT TESTING & CODE INTEGRITY
+  # ==========================================
+  test:
+    name: Run Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+
+      - name: Execute Pytest Suite
+        run: |
+          pytest tests/ -v
+
+  # ==========================================
+  # GATE 2: DEVSECOPS CONTAINER CVE SCANNING
+  # ==========================================
+  security-scan:
+    name: Trivy Container Vulnerability Scan
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Build Local Container Image for Scanning
+        run: |
+          docker build -t payment-api:${{ github.sha }} .
+
+      - name: Run Trivy Security Gate
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: 'payment-api:${{ github.sha }}'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+  # ==========================================
+  # GATE 3: AWS OIDC AUTH & AMAZON ECR DELIVERY
+  # ==========================================
+  build-and-push:
+    name: Build & Push to Amazon ECR
+    needs: [test, security-scan]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::182730822489:role/GitHubActions-PaymentAPI-ECR
+          aws-region: us-east-1
+          audience: sts.amazonaws.com
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, Tag, and Push Docker Image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: payment-api
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "Pushed Image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
