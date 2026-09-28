@@ -51,15 +51,13 @@ jobs:
         run: |
           docker build -t payment-api:${{ github.sha }} .
 
+      - name: Install Trivy CLI
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+
       - name: Run Trivy Security Gate
-        uses: aquasecurity/trivy-action@v0.29.0
-        with:
-          image-ref: 'payment-api:${{ github.sha }}'
-          format: 'table'
-          exit-code: '1'
-          ignore-unfixed: true
-          vuln-type: 'os,library'
-          severity: 'CRITICAL,HIGH'
+        run: |
+          trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed payment-api:${{ github.sha }}
 
   # ==========================================
   # GATE 3: AWS OIDC AUTH & AMAZON ECR DELIVERY
